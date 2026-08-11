@@ -1,0 +1,6 @@
+.build/
+.DS_Store
+*.scpt
+*.scptd/
+xcuserdata/
+DerivedData/
