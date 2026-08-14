@@ -7,25 +7,30 @@ build_dir="$project_dir/.build/standalone"
 binary="$build_dir/roblox-replay"
 module_cache="$build_dir/module-cache"
 
-mkdir -p "$module_cache"
+mkdir -p "$build_dir"
 
-if [[ ! -x "$binary" || "$source_file" -nt "$binary" ]]; then
-    swift_compiler="$(xcrun --find swiftc)"
-    target="$(uname -m)-apple-macosx13.0"
-    sdk_arguments=()
-
-    # Some Command Line Tools releases ship a default SDK whose Swift module is
-    # older than their compiler. The 14.5 SDK is a compatible fallback when it
-    # is installed; otherwise xcrun's current default is used.
-    compatible_sdk="/Library/Developer/CommandLineTools/SDKs/MacOSX14.5.sdk"
-    if [[ -d "$compatible_sdk" ]]; then
-        sdk_arguments=(-sdk "$compatible_sdk")
+if [[ ! -x "$binary" || "$source_file" -nt "$binary" || "$0" -nt "$binary" ]]; then
+    # Use the compiler and current SDK from the same selected Apple toolchain.
+    # Mixing a newer compiler with a hard-coded older SDK can load two
+    # incompatible SwiftBridging module maps.
+    swift_compiler="$(xcrun --sdk macosx --find swiftc)"
+    sdk="$(xcrun --sdk macosx --show-sdk-path)"
+    unversioned_target="$("$swift_compiler" -print-target-info | sed -n 's/.*"unversionedTriple": "\([^"]*\)".*/\1/p')"
+    if [[ "$unversioned_target" != *-apple-macosx ]]; then
+        echo "Unable to determine the macOS target from $swift_compiler" >&2
+        exit 1
     fi
+    target="${unversioned_target}13.0"
+
+    # Do not reuse Clang modules produced by a previous SDK/toolchain pairing.
+    rm -rf "$module_cache"
+    mkdir -p "$module_cache"
 
     echo "Building Roblox Replay…"
-    env CLANG_MODULE_CACHE_PATH="$module_cache" \
+    env -u SDKROOT -u CPATH -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH \
+        CLANG_MODULE_CACHE_PATH="$module_cache" \
         "$swift_compiler" \
-        "${sdk_arguments[@]}" \
+        -sdk "$sdk" \
         -target "$target" \
         "$source_file" \
         -o "$binary" \
